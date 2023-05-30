@@ -17,9 +17,4 @@ public enum Currency {
     Currency(String currency) {
         this.currency = currency;
     }
-
-
-
-
-
 }
