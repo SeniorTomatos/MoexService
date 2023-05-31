@@ -1,8 +1,7 @@
 package com.startois.moexservice.service;
 
-import com.startois.moexservice.dto.BondDto;
-import com.startois.moexservice.dto.StocksDto;
-import com.startois.moexservice.dto.TickersDto;
+import com.startois.moexservice.dto.*;
+import com.startois.moexservice.exception.BondNotFoundException;
 import com.startois.moexservice.exception.LimitRequestsException;
 import com.startois.moexservice.model.Currency;
 import com.startois.moexservice.model.Stock;
@@ -11,6 +10,8 @@ import com.startois.moexservice.moexClient.GovBondsClient;
 import com.startois.moexservice.parser.Parser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -22,15 +23,14 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BondService {
 
-    private final CorporateBondsClient corparateBondsClient;
-    private final GovBondsClient govBondsClient;
+    private final BondRepository bondRepository;
 
-    private final Parser parser;
+    private final CacheManager cacheManager;
 
     public StocksDto getBondsFromMoex(TickersDto tickersDto) {
         List<BondDto> allBonds = new ArrayList<>();
-        allBonds.addAll(getCorporateBonds());
-        allBonds.addAll(getGovBonds());
+        allBonds.addAll(bondRepository.getCorporateBonds());
+        allBonds.addAll(bondRepository.getGovBonds());
 
 
         List<BondDto> resultBonds = allBonds.stream()
@@ -52,26 +52,22 @@ public class BondService {
         return new StocksDto(stocks);
     }
 
-    public List<BondDto> getCorporateBonds() {
-        String xmlFromMoex = corparateBondsClient.getBondsFromMoex();
-        List<BondDto> bonds = parser.parse(xmlFromMoex);
-        if(bonds.isEmpty()) {
-            log.error("Moex isn't answering for getting corporate bonds.");
-            throw new LimitRequestsException("Moex isn't answering for getting corporate bonds.");
+
+    public StockPricesDto getPricesByFigies(FigiesDto figiesDto) {
+        log.info("Request for figies {}", figiesDto.getFigies());
+        List<String> figies = new ArrayList<>(figiesDto.getFigies());
+        List<BondDto> allBonds = new ArrayList<>();
+        allBonds.addAll(bondRepository.getGovBonds());
+        allBonds.addAll(bondRepository.getCorporateBonds());
+        figies.removeAll(allBonds.stream()
+                .map(b -> b.getTicker()).collect(Collectors.toList()));
+        if (!figies.isEmpty()) {
+            throw new BondNotFoundException(String.format("Bonds %s not found.", figies));
         }
-        return bonds;
+        List<StockPrice> prices = allBonds.stream()
+                .filter(b -> figiesDto.getFigies().contains(b.getTicker()))
+                .map(b -> new StockPrice(b.getTicker(), b.getPrice() * 10))
+                .collect(Collectors.toList());
+        return new StockPricesDto(prices);
     }
-
-    public List<BondDto> getGovBonds() {
-        String xmlFromMoex = govBondsClient.getBondsFromMoex();
-
-        List<BondDto> bonds = parser.parse(xmlFromMoex);
-        if(bonds.isEmpty()) {
-            log.error("Moex isn't answering for getting government bonds.");
-            throw new LimitRequestsException("Moex isn't answering for getting government bonds.");
-        }
-        return bonds;
-    }
-
-
 }
